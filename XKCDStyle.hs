@@ -20,8 +20,7 @@ xkcd img = generateImage getPixel w h
 
 main :: IO ()
 main = do
-  path <- readFile . head =<< getArgs
-  dImg <- readImage path
+  dImg <- readImage . head =<< getArgs
   writePng "output.png" $ case dImg of
     Left msg -> error msg
     Right (ImageRGB8  img) -> xkcd (promoteImage img)
