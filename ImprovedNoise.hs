@@ -1,7 +1,19 @@
--- | Based on Java reference implementation - (c) 2002 Ken Perling
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  ImprovedNoise
+-- Copyright   :  (c) 2014 Jeffrey Rosenbluth
+-- License     :  BSD-style (see LICENSE)
+-- Maintainer  :  jeffrey.rosenbluth@gmail.com
+--
+-- Improved Perling Noise
+-- Based on Java reference implementation - (c) 2002 Ken Perlin
+-----------------------------------------------------------------------------
 
 module ImprovedNoise 
-  (improvedNoise, improvedNoiseI) where
+  ( improvedNoise
+  , pnoise', pnoise
+  , improvedNoiseI
+  ) where
 
 import qualified Data.Vector.Storable as V
 import           Data.Vector.Storable    (Vector, fromList, (!))
@@ -25,6 +37,10 @@ permutation = fromList [ 151,160,137,91,90,15,
 p :: Vector Int
 p = permutation V.++ permutation
 
+-------------------------------------------------------------------------------
+-- Double Precision Noise
+-------------------------------------------------------------------------------
+
 fade :: Double -> Double
 fade t = t * t * t * (t * (t * 6 -15) + 10)
 
@@ -34,9 +50,9 @@ lerp t a b = a + t * (b - a)
 grad :: Num a => Int -> a -> a -> a -> a
 grad hash x y z
   | h .&. 1 == 0, h .&. 2 == 0 = u + v
-  | h .&. 1 == 0             = u - v
-  |             h .&. 2 == 0 = v - u
-  | otherwise                = - (u + v)
+  | h .&. 1 == 0               = u - v
+  | h .&. 2 == 0               = v - u
+  | otherwise                  = - (u + v)
   where
     -- Convert lo 4 bits of hase code into 12 gradient directions.
     h = hash .&. 15
@@ -61,7 +77,7 @@ improvedNoise x' y' z' =
        (lerp u (grad (p ! (ab+1))  x    (y-1) (z-1))
                (grad (p ! (bb+1)) (x-1) (y-1) (z-1))))
   where
-    flr = realToFrac . floor
+    flr = realToFrac . (floor :: Double -> Int)
     -- Find unit cube thta contains point.
     (xx, yy, zz) = (floor x' .&. 255, floor y' .&. 255, floor z' .&. 255)
     -- Find relative x, y, z of point in cube.
@@ -72,36 +88,54 @@ improvedNoise x' y' z' =
     (a,  aa, ab) = (p ! xx + yy,      p ! a + zz,       p ! (a+1) + zz  )
     (b,  ba, bb) = (p ! (xx+1) + yy,  p ! b + zz,       p ! (b+1) + zz  )
 
+
+pnoise' :: Double -> Double -> Double -> Int -> Double -> Double
+pnoise' x y z octaves persistence = total / maxValue
+  where
+    total = sum $ zipWith3 improvedNoise xs ys zs
+    maxValue = sum amplitudes
+    amplitudes = [persistence ^ i | i <- [0..octaves-1]]
+    xs = [x * 2 ^ i | i <- [0..octaves-1]]
+    ys = [y * 2 ^ i | i <- [0..octaves-1]]
+    zs = [z * 2 ^ i | i <- [0..octaves-1]]
+
+pnoise :: Double -> Double -> Double -> Double
+pnoise x y z = pnoise' x y z 6 0.5
+      
+-------------------------------------------------------------------------------
+-- Integral Noise
+--
+-- XXX Not tested XXX --
 -------------------------------------------------------------------------------
 
 fadeI :: Int -> Int
 fadeI t = t0 + ((t .&. 255) * (t1 - t0) `shiftR` 8)
   where
     t0 = f ! (t `shiftR` 8)
-    t1 = f ! (min 255 ((t `shiftR` 8) + 1))
-    f = fromList $ map floor[(1e12) * fade (i / 256) | i <- [0..255]]
+    t1 = f ! min 255 ((t `shiftR` 8) + 1)
+    f = fromList $ map floor[1e12 * fade (i / 256) | i <- [0..255]]
 
 lerpI :: Int -> Int -> Int -> Int
 lerpI t a b = a + shiftR (t * (b - a)) 12
-  -- Add blended results from 8 corners of cube.
 
 improvedNoiseI :: Int -> Int -> Int -> Int
 improvedNoiseI x' y' z' =
   lerpI w
     (lerpI v
        (lerpI u (grad (p ! aa)  x     y    z)
-               (grad (p ! ba) (x-n)  y    z))
+                (grad (p ! ba) (x-n)  y    z))
        (lerpI u (grad (p ! ab)  x    (y-n) z)
-               (grad (p ! bb) (x-n) (y-n) z)))
-     (lerpI v
+                (grad (p ! bb) (x-n) (y-n) z)))
+    (lerpI v
        (lerpI u (grad (p ! (aa+1))  x     y    (z-n))
-               (grad (p ! (ba+1)) (x-n)  y    (z-n)))
+                (grad (p ! (ba+1)) (x-n)  y    (z-n)))
        (lerpI u (grad (p ! (ab+1))  x    (y-n) (z-n))
-               (grad (p ! (bb+1)) (x-n) (y-n) (z-n))))
+                (grad (p ! (bb+1)) (x-n) (y-n) (z-n))))
   where
     n = shiftL 1 16
-    (xx, yy, zz) = (shiftR x' 16 .&. 255, shiftR y' 16 .&. 255, shiftR z' 16 .&. 255)
-    (x,  y,  z ) = (x' .&. (n-1),         y' .&. (n-1),         z' .&. (n-1)        )
-    (u,  v,  w ) = (fadeI x,              fadeI y,              fadeI z             )
-    (a,  aa, ab) = (p ! xx + yy,          p ! a + zz,           p ! (a+1) + zz  )
-    (b,  ba, bb) = (p ! (xx+1) + yy,      p ! b + zz,           p ! (b+1) + zz  )
+    f k = shiftR k  16 .&. 255
+    (xx, yy, zz) = (f x' , f y', f z')
+    (x,  y,  z ) = (x' .&. (n-1),    y' .&. (n-1), z' .&. (n-1)  )
+    (u,  v,  w ) = (fadeI x,         fadeI y,      fadeI z       )
+    (a,  aa, ab) = (p ! xx + yy,     p ! a + zz,   p ! (a+1) + zz)
+    (b,  ba, bb) = (p ! (xx+1) + yy, p ! b + zz,   p ! (b+1) + zz)
